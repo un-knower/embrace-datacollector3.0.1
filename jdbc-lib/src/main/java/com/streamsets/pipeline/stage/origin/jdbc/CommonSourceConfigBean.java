@@ -1,0 +1,277 @@
+/*
+ * Copyright 2017 StreamSets Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.streamsets.pipeline.stage.origin.jdbc;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.RateLimiter;
+import com.streamsets.pipeline.api.Config;
+import com.streamsets.pipeline.api.ConfigDef;
+import com.streamsets.pipeline.api.Stage;
+import com.streamsets.pipeline.config.upgrade.UpgraderUtils;
+import com.streamsets.pipeline.lib.el.TimeEL;
+import com.streamsets.pipeline.lib.jdbc.JdbcErrors;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.math.NumberUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public final class CommonSourceConfigBean {
+  private static final Logger LOG = LoggerFactory.getLogger(CommonSourceConfigBean.class);
+  public static final String DEFAULT_QUERIES_PER_SECONDS = "10";
+
+  public CommonSourceConfigBean() {}
+
+  @VisibleForTesting
+  public CommonSourceConfigBean(String queriesPerSecond, int maxBatchSize, int maxClobSize, int maxBlobSize) {
+    this.queriesPerSecond = queriesPerSecond;
+    this.maxBatchSize = maxBatchSize;
+    this.maxClobSize = maxClobSize;
+    this.maxBlobSize = maxBlobSize;
+    this.numSQLErrorRetries = 0;
+  }
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.STRING,
+      defaultValue = DEFAULT_QUERIES_PER_SECONDS,
+      label = "每秒查询",
+      description = "用以设置每秒运行的查询数.设置为0时表示不限制",
+      displayPosition = 60,
+      group = "JDBC"
+  )
+  public String queriesPerSecond = DEFAULT_QUERIES_PER_SECONDS;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.NUMBER,
+      defaultValue = "1000",
+      label = "最大批大小(记录)",
+      displayPosition = 140,
+      group = "JDBC"
+  )
+  public int maxBatchSize;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.NUMBER,
+      defaultValue = "1000",
+      label = "最大Clob大小(字符)",
+      displayPosition = 150,
+      group = "JDBC"
+  )
+  public int maxClobSize;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.NUMBER,
+      defaultValue = "1000",
+      label = "最大Blob大小(字节)",
+      displayPosition = 151,
+      group = "JDBC"
+  )
+  public int maxBlobSize;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.NUMBER,
+      defaultValue = "0",
+      label = "对SQL错误的重试次数",
+      description = "对SQL错误的重试次数",
+      min = 0,
+      displayPosition = 160,
+      group = "JDBC"
+  )
+  public int numSQLErrorRetries;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.BOOLEAN,
+      label = "允许延迟表",
+      displayPosition = 170,
+      group = "JDBC",
+      defaultValue = "false"
+  )
+  public boolean allowLateTable = false;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.NUMBER,
+      defaultValue = "${10 * SECONDS}",
+      label = "新表发现间隔",
+      displayPosition = 171,
+      elDefs = {TimeEL.class},
+      evaluation = ConfigDef.Evaluation.IMPLICIT,
+      group = "JDBC",
+      dependsOn = "allowLateTable",
+      triggeredByValue = "true"
+  )
+  public long newTableQueryInterval;
+
+  @ConfigDef(
+      required = true,
+      type = ConfigDef.Type.BOOLEAN,
+      defaultValue = "false",
+      label = "启用Schema改变事件",
+      displayPosition = 172,
+      group = "JDBC"
+  )
+  public boolean enableSchemaChanges;
+
+  private static final String MAX_BATCH_SIZE = "maxBatchSize";
+  private static final String MAX_CLOB_SIZE = "maxClobSize";
+  private static final String MAX_BLOB_SIZE = "maxBlobSize";
+  private static final String QUERIES_PER_SECOND = "queriesPerSecond";
+  public static final String NUM_SQL_ERROR_RETRIES = "numSQLErrorRetries";
+  public static final String COMMON_SOURCE_CONFIG_BEAN_PREFIX = "commonSourceConfigBean.";
+
+  public List<Stage.ConfigIssue> validateConfigs(Stage.Context context, List<Stage.ConfigIssue> issues) {
+    if (maxBatchSize < 0) {
+      issues.add(context.createConfigIssue(Groups.ADVANCED.name(), COMMON_SOURCE_CONFIG_BEAN_PREFIX + MAX_BATCH_SIZE, JdbcErrors.JDBC_10, maxBatchSize, 0));
+    }
+    if (maxClobSize < 0) {
+      issues.add(context.createConfigIssue(Groups.ADVANCED.name(), COMMON_SOURCE_CONFIG_BEAN_PREFIX + MAX_CLOB_SIZE, JdbcErrors.JDBC_10, maxClobSize, 0));
+    }
+    if (maxBlobSize < 0) {
+      issues.add(context.createConfigIssue(Groups.ADVANCED.name(), COMMON_SOURCE_CONFIG_BEAN_PREFIX + MAX_BLOB_SIZE, JdbcErrors.JDBC_10, maxBlobSize, 0));
+    }
+    if (!NumberUtils.isNumber(queriesPerSecond)) {
+      issues.add(context.createConfigIssue(
+          Groups.JDBC.name(),
+          COMMON_SOURCE_CONFIG_BEAN_PREFIX + QUERIES_PER_SECOND,
+          JdbcErrors.JDBC_88,
+          queriesPerSecond
+      ));
+    }
+    return issues;
+  }
+
+  public RateLimiter creatQueryRateLimiter() {
+    final BigDecimal rateLimit = new BigDecimal(queriesPerSecond);
+    if (rateLimit.signum() < 1) {
+      // negative or zero value; no rate limit
+      return null;
+    } else {
+      return RateLimiter.create(rateLimit.doubleValue());
+    }
+  }
+
+  public static void upgradeRateLimitConfigs(
+      List<Config> configs,
+      String pathToCommonSourceConfigBean,
+      int numThreads
+  ) {
+    final String queryIntervalField = String.format("%s.queryInterval", pathToCommonSourceConfigBean);
+    final String queriesPerSecondField = String.format("%s.queriesPerSecond", pathToCommonSourceConfigBean);
+    Config queryIntervalConfig = UpgraderUtils.getAndRemoveConfigWithName(configs, queryIntervalField);
+    if (queryIntervalConfig == null) {
+      throw new IllegalStateException(String.format("Did not find %s in configs: %s", queryIntervalField, configs));
+    }
+
+    final Object queryIntervalValue = queryIntervalConfig.getValue();
+
+    final BigDecimal queriesPerSecond = getQueriesPerSecondFromInterval(
+        queryIntervalValue,
+        numThreads,
+        queriesPerSecondField,
+        queryIntervalField
+    );
+
+    configs.add(new Config(queriesPerSecondField, queriesPerSecond.toPlainString()));
+  }
+
+
+  public static BigDecimal getQueriesPerSecondFromInterval(
+      Object queryIntervalValue,
+      int numThreads,
+      String queriesPerSecondField,
+      String queryIntervalField
+  ) {
+    if (numThreads <= 0) {
+      LOG.warn("numThreads was given as {} in query rate limit upgrade; switching to default value of 1", numThreads);
+      numThreads = 1;
+    }
+
+    BigDecimal queriesPerSecond = new BigDecimal(DEFAULT_QUERIES_PER_SECONDS);
+
+    Long intervalSeconds = null;
+    if (queryIntervalValue instanceof String) {
+      final String queryIntervalExpr = (String) queryIntervalValue;
+
+      // total hack, but we don't have access to a real EL evaluation within upgraders so we will only recognize
+      // specific kinds of experssions (namely, the previous default value of ${10 * SECONDS}, or any similar
+      // expression with a number other than 10
+      final String secondsElExpr = "^\\s*\\$\\{\\s*([0-9]*)\\s*\\*\\s*SECONDS\\s*\\}\\s*$";
+
+      final Matcher matcher = Pattern.compile(secondsElExpr).matcher(queryIntervalExpr);
+      if (matcher.matches()) {
+        final String secondsStr = matcher.group(1);
+        intervalSeconds = Long.valueOf(secondsStr);
+      } else if (StringUtils.isNumeric(queryIntervalExpr)) {
+        intervalSeconds = Long.valueOf(queryIntervalExpr);
+      } else {
+        LOG.warn(
+            "{} was a String, but was not a recognized format (either EL expression like '${N * SECONDS}' or simply" +
+                " an integral number, so could not automatically convert it; will use a default value",
+            queryIntervalValue
+        );
+      }
+    } else if (queryIntervalValue instanceof Integer) {
+      intervalSeconds = (long) ((Integer) queryIntervalValue).intValue();
+    } else if (queryIntervalValue instanceof Long) {
+      intervalSeconds = (Long)queryIntervalValue;
+    }
+
+    if (intervalSeconds != null) {
+      if (intervalSeconds > 0) {
+        // Force a double operation to not lose precision.
+        // Don't use BigDecimal#divide() to avoid hitting ArithmeticException if numThreads/intervalSeconds
+        // is non-terminating.
+        queriesPerSecond = BigDecimal.valueOf(((double) numThreads)/intervalSeconds);
+        LOG.info(
+            "Calculated a {} value of {} from {} of {} and numThreads of {}",
+            queriesPerSecondField,
+            queriesPerSecond,
+            queryIntervalField,
+            queryIntervalValue,
+            numThreads
+        );
+      } else {
+        queriesPerSecond = BigDecimal.ZERO;
+        LOG.warn(
+            "{} value of {} was not positive, so had to use a value of {} for {}, which means unlimited",
+            queryIntervalField,
+            queryIntervalValue,
+            queriesPerSecondField,
+            queriesPerSecond
+        );
+      }
+    } else {
+      LOG.warn(
+          "Could not calculate a {} value, so using a default value of {}",
+          queriesPerSecondField,
+          queriesPerSecond
+      );
+    }
+
+    return queriesPerSecond;
+  }
+
+}

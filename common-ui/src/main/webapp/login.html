@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="description" content="StreamSets">
+  <title ng-bind="common.title">大数据采集平台</title>
+
+  <script type="text/javascript">
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.appendChild(document.createTextNode(str));
+      return div.innerHTML;
+    }
+
+    var baseHref = document.location.pathname.replace('j_security_check', ''),
+            collectorIndex = baseHref.indexOf('/collector/');
+
+    if(collectorIndex !== -1) {
+      baseHref = baseHref.substr(0, collectorIndex + 1);
+    } else {
+      var restIndex = baseHref.indexOf('/rest/');
+      if(restIndex !== -1) {
+        baseHref = baseHref.substr(0, restIndex + 1);
+      }
+    }
+
+    document.write("<base href='" + escapeHtml(baseHref) + "' />");
+  </script>
+
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+
+  <!-- compiled CSS -->
+  <% styles.forEach( function ( file ) { %>
+  <link rel="stylesheet" type="text/css" href="<%= file %>" /><% }); %>
+  <link rel="stylesheet" type="text/css" href="assets/embrace.css" />
+</head>
+<body>
+
+<div class="container login-container" style="background-color:write;">
+  <div class="row">
+    <div id="loginErrorMessageDivId"
+         class="col-xs-6 col-xs-offset-3 col-sm-5 col-sm-offset-4 col-md-4 col-md-offset-4 col-lg-4 col-lg-offset-4 alert alert-danger"
+         role="alert">Log In Failed.</div>
+  </div>
+
+  <div class="row" >
+    <div
+            class="col-xs-6 col-xs-offset-3 col-sm-5 col-sm-offset-4 col-md-4 col-md-offset-4 col-lg-4 col-lg-offset-4 form-login" style="background-color:#0f70b4;">
+      <form class="form-horizontal clearfix" action="j_security_check"
+            autocomplete="off"
+            method="POST">
+        <div class="img_container">
+          <div ><img src="assets/logo-datacollection.png" style="width:300px;margin-top:20px;"></div>
+        </div>
+        <input style="display:none">
+        <input type="password" style="display:none" autocomplete="off">
+        <input type="text" id="usernameId" name="j_username" class="form-control" placeholder="用户名"
+               autofocus="true"/>
+        <input type="password" id="passwordId" name="j_password" class="form-control" placeholder="密码"
+               autocomplete="off"/>
+        <input type="hidden" id="basePathInputID" name="basePath" class="form-control" value="" />
+        <button type="submit" id="loginId"
+                class="btn btn-primary pull-right">登录 <i class="fa fa-sign-in"></i></button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+  var pathname = window.location.pathname;
+  if(pathname && pathname.indexOf('j_security_check') !== -1) {
+    var errorDiv = document.getElementById('loginErrorMessageDivId');
+    errorDiv.style.visibility = 'visible';
+  }
+
+  var basePathInput = document.getElementById("basePathInputID");
+  if(basePathInput) {
+    basePathInput.value = baseHref;
+  }
+</script>
+
+</body>
+</html>

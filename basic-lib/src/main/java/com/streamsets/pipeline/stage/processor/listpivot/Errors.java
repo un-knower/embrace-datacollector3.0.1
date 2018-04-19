@@ -1,0 +1,48 @@
+/*
+ * Copyright 2017 StreamSets Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.streamsets.pipeline.stage.processor.listpivot;
+
+import com.streamsets.pipeline.api.ErrorCode;
+import com.streamsets.pipeline.api.GenerateResourceBundle;
+
+@GenerateResourceBundle
+public enum Errors implements ErrorCode {
+  LIST_PIVOT_00("字段'{}'不是LIST, LIST_MAP或MAP"),
+  LIST_PIVOT_01("记录'{}'不包含字段'{}'"),
+  LIST_PIVOT_02("若不复制所有字段则无法保存源字段名."),
+  LIST_PIVOT_03("转置项路径和源字段路径不能包含相同的值"),
+//  LIST_PIVOT_00("Field '{}' is not a LIST, LIST_MAP, or MAP"),
+//  LIST_PIVOT_01("Record '{}' does not contain field '{}'"),
+//  LIST_PIVOT_02("Cannot save original field name without copying all fields."),
+//  LIST_PIVOT_03("Pivoted Items Path and Original Field Name Path can't contain the same value"),
+  ;
+
+  private final String msg;
+  Errors(String msg) {
+    this.msg = msg;
+  }
+
+  @Override
+  public String getCode() {
+    return name();
+  }
+
+  @Override
+  public String getMessage() {
+    return msg;
+  }
+
+}
